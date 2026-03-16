@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CalcPro</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'JetBrains Mono',monospace;}
+    .cb{transition:all .12s ease;cursor:pointer;border:none;outline:none;}
+    .cb:hover{filter:brightness(1.15);transform:scale(0.97);}
+    .cb:active{transform:scale(0.93);}
+    .cb.locked{opacity:.3;cursor:not-allowed;filter:grayscale(1);}
+    .ab{transition:all .15s;cursor:pointer;border:none;}
+    .ab:hover{filter:brightness(1.12);}
+    .ub{transition:all .15s;cursor:pointer;border:none;}
+    .ub:hover{filter:brightness(1.1);}
+    input,select{outline:none;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:#666;border-radius:4px;}
+    a{text-decoration:none;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .spin{animation:spin 1s linear infinite;display:inline-block;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect,useRef,createElement:h}=React;
+
+const DK={bg:"#111214",surface:"#1c1d20",surfaceAlt:"#26272c",accent:"#f97316",text:"#f0f0f0",textMuted:"#888",buttonBg:"#2a2b30",borderRadius:"14px",fontFamily:"'JetBrains Mono',monospace"};
+const LK={bg:"#f1f2f4",surface:"#ffffff",surfaceAlt:"#e4e5ea",accent:"#f97316",text:"#18181b",textMuted:"#6b7280",buttonBg:"#e4e5ea",borderRadius:"14px",fontFamily:"'JetBrains Mono',monospace"};
+const FS={small:0.85,medium:1,large:1.2};
+
+// ── localStorage helpers (user prefs only — personal settings) ────────────────
+function lsGet(key,fallback){try{var v=localStorage.getItem(key);return v!==null?JSON.parse(v):fallback;}catch(e){return fallback;}}
+function lsSet(key,val){try{localStorage.setItem(key,JSON.stringify(val));}catch(e){}}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function apiGet(path){
+  var r=await fetch(path);return r.json();
+}
+async function apiPost(path,body){
+  var r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return r.json();
+}
+async function apiDelete(path){
+  var r=await fetch(path,{method:'DELETE'});return r.json();
+}
+
+// ── Reusable components ───────────────────────────────────────────────────────
+function Toggle({label,desc,checked,onChange,t}){
+  return h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+    h('div',null,
+      h('div',{style:{color:t.text,fontWeight:600,fontSize:14}},label),
+      desc&&h('div',{style:{color:t.textMuted,fontSize:12,marginTop:2}},desc)
+    ),
+    h('div',{onClick:onChange,style:{width:48,height:26,borderRadius:13,background:checked?t.accent:t.surfaceAlt,cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}},
+      h('div',{style:{width:20,height:20,borderRadius:'50%',background:'#fff',position:'absolute',top:3,left:checked?25:3,transition:'left .2s'}})
+    )
+  );
+}
+
+function Section({title,children,t}){
+  return h('div',{style:{background:t.surface,borderRadius:16,padding:'20px',marginBottom:14}},
+    h('div',{style:{color:t.accent,fontSize:11,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:16}},title),
+    h('div',{style:{display:'flex',flexDirection:'column',gap:16}},children)
+  );
+}
+
+function PinInputRow({value,onChange,t}){
+  return h('div',null,
+    h('div',{style:{display:'flex',gap:10,marginBottom:12}},
+      ...[0,1,2,3].map(i=>h('div',{key:i,style:{width:52,height:56,borderRadius:10,background:t.surfaceAlt,border:'2px solid '+(value.length===i?t.accent:value.length>i?t.accent+'66':t.surfaceAlt),display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:700,color:t.text,transition:'border .15s',fontFamily:t.fontFamily}},value[i]?'●':'')),
+      h('button',{onClick:function(){onChange(value.slice(0,-1));},style:{marginLeft:8,background:t.surfaceAlt,color:t.textMuted,border:'none',borderRadius:10,padding:'0 16px',fontSize:18,cursor:'pointer',fontFamily:t.fontFamily}},'⌫')
+    ),
+    h('div',{style:{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}},
+      ...[1,2,3,4,5,6,7,8,9,0].map(n=>h('button',{key:n,className:'ab',onClick:function(){if(value.length<4)onChange(value+n);},style:{background:t.buttonBg,color:t.text,border:'none',borderRadius:8,padding:'12px',fontSize:15,fontWeight:600,cursor:'pointer',fontFamily:t.fontFamily}},n))
+    )
+  );
+}
+
+// ── Loading screen ────────────────────────────────────────────────────────────
+function LoadingScreen({t}){
+  return h('div',{style:{minHeight:'100vh',background:t.bg,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:t.fontFamily}},
+    h('div',{style:{background:t.accent,borderRadius:'16px',width:56,height:56,display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,marginBottom:20}},'🧮'),
+    h('div',{style:{color:t.text,fontSize:18,fontWeight:700,fontFamily:"'Sora',sans-serif",marginBottom:8}},'CalcPro'),
+    h('div',{style:{color:t.textMuted,fontSize:13}},'Loading settings…')
+  );
+}
+
+// ── PIN Screen ────────────────────────────────────────────────────────────────
+function PinScreen({pin,setPin,error,loading,onSubmit,onBack,t}){
+  return h('div',{style:{minHeight:'100vh',background:t.bg,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:t.fontFamily}},
+    h('div',{style:{background:t.surface,borderRadius:20,padding:'40px 32px',width:300,textAlign:'center'}},
+      h('div',{style:{fontSize:36,marginBottom:12}},'🔐'),
+      h('div',{style:{color:t.text,fontWeight:700,fontSize:18,marginBottom:6}},'Admin Access'),
+      h('div',{style:{color:t.textMuted,fontSize:13,marginBottom:24}},'Enter your PIN to continue'),
+      h('div',{style:{display:'flex',justifyContent:'center',gap:10,marginBottom:24}},
+        ...[0,1,2,3].map(i=>h('div',{key:i,style:{width:14,height:14,borderRadius:'50%',background:pin.length>i?t.accent:t.surfaceAlt,transition:'background .2s'}}))
+      ),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:14}},
+        ...[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(function(k,i){return h('button',{key:i,onClick:function(){if(k==='⌫')setPin(p=>p.slice(0,-1));else if(k!==''&&pin.length<4)setPin(p=>p+k);},style:{background:k===''?'transparent':t.buttonBg,color:t.text,border:'none',borderRadius:12,padding:'16px',fontSize:18,cursor:k===''?'default':'pointer',fontFamily:t.fontFamily}},k);})
+      ),
+      error&&h('div',{style:{color:'#ef4444',fontSize:13,marginBottom:12}},'❌ Wrong PIN. Try again.'),
+      h('div',{style:{display:'flex',gap:10}},
+        h('button',{onClick:onBack,style:{flex:1,background:t.surfaceAlt,color:t.textMuted,border:'none',borderRadius:12,padding:'14px',cursor:'pointer',fontFamily:t.fontFamily}},'Cancel'),
+        h('button',{onClick:onSubmit,disabled:loading,style:{flex:1,background:t.accent,color:'#fff',border:'none',borderRadius:12,padding:'14px',cursor:'pointer',fontWeight:700,fontFamily:t.fontFamily}},loading?'…':'Enter')
+      )
+    )
+  );
+}
+
+// ── Calculator ────────────────────────────────────────────────────────────────
+function Calculator({t,appName,history,addHistory,recordOp,lockedButtons,features,userPrefs,onAdminPress,onUserSettings}){
+  var fs=FS[userPrefs&&userPrefs.fontSize||'medium'];
+  var ls=userPrefs&&userPrefs.lineScale||1.0;
+  const [display,setDisplay]=useState('0');
+  const [expr,setExpr]=useState('');
+  const [memory,setMemory]=useState(0);
+  const [mode,setMode]=useState('basic');
+  const [showHist,setShowHist]=useState(false);
+  const [justEvaled,setJustEvaled]=useState(false);
+  const [tapCount,setTapCount]=useState(0);
+  const tapTimer=useRef(null);
+
+  var handleNameTap=function(){
+    var next=tapCount+1;setTapCount(next);clearTimeout(tapTimer.current);
+    if(next>=5){setTapCount(0);onAdminPress();}
+    else{tapTimer.current=setTimeout(function(){setTapCount(0);},1500);}
+  };
+  var append=function(val){
+    if(lockedButtons[val])return;
+    setDisplay(function(prev){
+      if(justEvaled&&/[0-9.]/.test(val)){setJustEvaled(false);return val;}
+      setJustEvaled(false);
+      if(prev==='0'&&/[0-9]/.test(val))return val;
+      if(val==='.'&&prev.includes('.'))return prev;
+      return prev+val;
+    });
+  };
+  var setOp=function(op){
+    if(lockedButtons[op])return;
+    recordOp(op);setExpr(display+' '+op+' ');setDisplay('0');setJustEvaled(false);
+  };
+  var evaluate=function(){
+    try{
+      var full=expr+display;
+      var safe=full.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');
+      var result=Function('"use strict";return('+safe+')')();
+      var rounded=parseFloat(result.toFixed(10)).toString();
+      addHistory(full,rounded);setDisplay(rounded);setExpr('');setJustEvaled(true);
+    }catch(e){setDisplay('Error');setExpr('');}
+  };
+  var clear=function(){setDisplay('0');setExpr('');setJustEvaled(false);};
+  var backspace=function(){setDisplay(function(d){return d.length>1?d.slice(0,-1):'0';});};
+  var toggleSign=function(){setDisplay(function(d){return d.startsWith('-')?d.slice(1):d==='0'?'0':'-'+d;});};
+  var percent=function(){setDisplay(function(d){return String(parseFloat(d)/100);});};
+
+  var sciOps=[
+    {label:'sin',fn:function(){setDisplay(String(parseFloat(Math.sin(parseFloat(display)*Math.PI/180).toFixed(10))));}},
+    {label:'cos',fn:function(){setDisplay(String(parseFloat(Math.cos(parseFloat(display)*Math.PI/180).toFixed(10))));}},
+    {label:'tan',fn:function(){setDisplay(String(parseFloat(Math.tan(parseFloat(display)*Math.PI/180).toFixed(10))));}},
+    {label:'√',fn:function(){setDisplay(String(parseFloat(Math.sqrt(parseFloat(display)).toFixed(10))));}},
+    {label:'x²',fn:function(){setDisplay(String(parseFloat(display)**2));}},
+    {label:'log',fn:function(){setDisplay(String(parseFloat(Math.log10(parseFloat(display)).toFixed(10))));}},
+    {label:'ln',fn:function(){setDisplay(String(parseFloat(Math.log(parseFloat(display)).toFixed(10))));}},
+    {label:'π',fn:function(){setDisplay(String(Math.PI));}},
+    {label:'1/x',fn:function(){setDisplay(String(1/parseFloat(display)));}},
+    {label:'e',fn:function(){setDisplay(String(Math.E));}},
+  ];
+
+  var rows=[
+    [{label:'AC',fn:clear,s:'func'},{label:'⌫',fn:backspace,s:'func'},
+     features.showPercent?{label:'%',fn:percent,s:'func'}:{label:' ',fn:function(){},s:'func'},
+     {label:'÷',fn:function(){setOp('÷');},s:'op'}],
+    [{label:'7',fn:function(){append('7');}},{label:'8',fn:function(){append('8');}},{label:'9',fn:function(){append('9');}},{label:'×',fn:function(){setOp('×');},s:'op'}],
+    [{label:'4',fn:function(){append('4');}},{label:'5',fn:function(){append('5');}},{label:'6',fn:function(){append('6');}},{label:'−',fn:function(){setOp('−');},s:'op'}],
+    [{label:'1',fn:function(){append('1');}},{label:'2',fn:function(){append('2');}},{label:'3',fn:function(){append('3');}},{label:'+',fn:function(){setOp('+');},s:'op'}],
+    [features.showPlusMinus?{label:'±',fn:toggleSign,s:'func'}:{label:'0',fn:function(){append('0');}},
+     {label:'0',fn:function(){append('0');}},{label:'.',fn:function(){append('.');}},{label:'=',fn:evaluate,s:'eq'}],
+  ];
+
+  return h('div',{style:{minHeight:'100vh',background:t.bg,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'20px',fontFamily:t.fontFamily}},
+    h('div',{style:{width:'100%',maxWidth:'380px'}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px'}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:'10px',cursor:'pointer',userSelect:'none'},onClick:handleNameTap},
+          h('div',{style:{background:t.accent,borderRadius:'10px',width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}},'🧮'),
+          h('div',null,
+            h('span',{style:{color:t.text,fontWeight:700,fontSize:16*fs,fontFamily:"'Sora',sans-serif"}},appName),
+            tapCount>0&&h('div',{style:{display:'flex',gap:4,marginTop:3}},
+              ...[1,2,3,4,5].map(function(i){return h('div',{key:i,style:{width:5,height:5,borderRadius:'50%',background:i<=tapCount?t.accent:t.surfaceAlt,transition:'background .15s'}});})
+            )
+          )
+        ),
+        h('div',{style:{display:'flex',gap:'8px'}},
+          features.showScientific&&h('button',{className:'cb',onClick:function(){setMode(function(m){return m==='basic'?'sci':'basic';});},style:{background:mode==='sci'?t.accent:t.surfaceAlt,color:t.text,borderRadius:'8px',padding:'6px 12px',fontSize:12*fs,fontWeight:600,fontFamily:t.fontFamily}},'SCI'),
+          features.showHistory&&h('button',{className:'cb',onClick:function(){setShowHist(function(s){return!s;});},style:{background:showHist?t.accent:t.surfaceAlt,color:t.text,borderRadius:'8px',padding:'6px 10px',fontSize:14}},'⏱'),
+          h('button',{className:'cb',onClick:onUserSettings,title:'Settings',style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:'8px',padding:'6px 10px',fontSize:14}},'👤')
+        )
+      ),
+      showHist&&features.showHistory&&h('div',{style:{background:t.surface,borderRadius:t.borderRadius,padding:'12px',marginBottom:'12px',maxHeight:160,overflowY:'auto'}},
+        history.length===0
+          ?h('div',{style:{color:t.textMuted,fontSize:13,textAlign:'center'}},'No history yet')
+          :history.map(function(item,i){return h('div',{key:i,style:{borderBottom:'1px solid '+t.surfaceAlt,padding:'6px 0',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            h('span',{style:{color:t.textMuted,fontSize:11}},item.expr),
+            h('span',{style:{color:t.accent,fontSize:13,fontWeight:600}},'= '+item.result)
+          );})
+      ),
+      mode==='sci'&&features.showScientific&&h('div',{style:{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'6px',marginBottom:'10px'}},
+        ...sciOps.map(function(op){return h('button',{key:op.label,className:'cb',onClick:op.fn,style:{background:t.surfaceAlt,color:t.accent,borderRadius:'10px',padding:'10px 4px',fontSize:12,fontWeight:600,fontFamily:t.fontFamily}},op.label);})
+      ),
+      h('div',{style:{background:t.surface,borderRadius:t.borderRadius,padding:'20px 20px 14px',marginBottom:'10px'}},
+        h('div',{style:{color:t.textMuted,fontSize:13*fs,textAlign:'right',minHeight:20,marginBottom:4,lineHeight:ls}},expr),
+        h('div',{style:{color:t.text,fontSize:(display.length>12?22:display.length>8?28:40)*fs,fontWeight:700,textAlign:'right',lineHeight:ls,wordBreak:'break-all'}},display),
+        h('div',{style:{color:t.textMuted,fontSize:12*fs,textAlign:'right',marginTop:6}},'DEG')
+      ),
+      features.showMemory&&h('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'6px',marginBottom:'8px'}},
+        ...['M+','M-','MR','MC'].map(function(m){return h('button',{key:m,className:'cb'+(lockedButtons[m]?' locked':''),onClick:function(){
+          if(lockedButtons[m])return;
+          if(m==='M+')setMemory(function(mem){return mem+parseFloat(display);});
+          if(m==='M-')setMemory(function(mem){return mem-parseFloat(display);});
+          if(m==='MR')setDisplay(String(memory));
+          if(m==='MC')setMemory(0);
+        },style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:'10px',padding:'10px',fontSize:12,fontWeight:600,fontFamily:t.fontFamily}},m+(m==='MR'&&memory!==0?' •':''));})
+      ),
+      ...rows.map(function(row,ri){return h('div',{key:ri,style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'8px',marginBottom:'8px'}},
+        ...row.map(function(btn,bi){
+          var isOp=btn.s==='op',isEq=btn.s==='eq',isFunc=btn.s==='func',isLocked=lockedButtons[btn.label];
+          return h('button',{key:bi,className:'cb'+(isLocked?' locked':''),onClick:btn.fn,style:{background:isOp||isEq?t.accent:isFunc?t.surfaceAlt:t.buttonBg,color:isOp||isEq?'#fff':isFunc?t.textMuted:t.text,borderRadius:t.borderRadius,padding:(18*ls)+'px 0',fontSize:20*fs,fontWeight:isOp||isEq?700:500,fontFamily:t.fontFamily,position:'relative',cursor:'pointer'}},
+            btn.label,
+            isLocked&&h('span',{style:{position:'absolute',top:4,right:6,fontSize:10}},'🔒')
+          );
+        })
+      );})
+    )
+  );
+}
+
+// ── Admin Panel ───────────────────────────────────────────────────────────────
+function AdminPanel({t,appName,setAppName,history,setHistory,lockedButtons,setLockedButtons,features,setFeatures,adminOverrides,setAdminOverrides,onExit}){
+  const [tab,setTab]=useState('overview');
+  const [nameInput,setNameInput]=useState(appName);
+  const [saved,setSaved]=useState('');
+  const [saving,setSaving]=useState(false);
+  const [stats,setStats]=useState({total:0});
+  const [pinStep,setPinStep]=useState('idle');
+  const [pinVerify,setPinVerify]=useState('');
+  const [pinNew,setPinNew]=useState('');
+  const [pinConfirm,setPinConfirm]=useState('');
+  const [pinMsg,setPinMsg]=useState({text:'',type:''});
+
+  useEffect(function(){
+    apiGet('/api/stats').then(function(d){setStats(d);}).catch(function(){});
+  },[history]);
+
+  var save=function(msg){setSaved(msg);setTimeout(function(){setSaved('');},2500);};
+
+  // Helper: push any admin setting change to server
+  var pushSettings=async function(patch){
+    setSaving(true);
+    var pin=sessionStorage.getItem('adminPin')||'';
+    var payload=Object.assign({pin:pin},patch);
+    var res=await apiPost('/api/settings',payload);
+    setSaving(false);
+    if(!res.ok){save('❌ Save failed: '+res.error);return false;}
+    return true;
+  };
+
+  var allBtns=['0','1','2','3','4','5','6','7','8','9','.','±','%','÷','×','−','+','=','⌫','AC','M+','M-','MR','MC'];
+  var tabs=[{id:'overview',label:'📊 Overview'},{id:'theme',label:'🎨 Theme'},{id:'features',label:'🔧 Features'},{id:'buttons',label:'🔒 Buttons'},{id:'history',label:'📋 History'},{id:'settings',label:'⚙️ Settings'}];
+  var totalOps=0;
+
+  return h('div',{style:{minHeight:'100vh',background:t.bg,fontFamily:t.fontFamily,display:'flex'}},
+    h('div',{style:{width:200,background:t.surface,borderRight:'1px solid '+t.surfaceAlt,padding:'24px 0',display:'flex',flexDirection:'column',minHeight:'100vh'}},
+      h('div',{style:{padding:'0 18px 20px',borderBottom:'1px solid '+t.surfaceAlt}},
+        h('div',{style:{color:t.accent,fontWeight:700,fontSize:15,fontFamily:"'Sora',sans-serif"}},'🧮 '+appName),
+        h('div',{style:{color:t.textMuted,fontSize:11,marginTop:3}},'Admin Panel'),
+        saving&&h('div',{style:{color:t.accent,fontSize:10,marginTop:4}},'⏳ Saving…')
+      ),
+      h('div',{style:{flex:1,paddingTop:12}},
+        ...tabs.map(function(tb){return h('button',{key:tb.id,className:'ab',onClick:function(){setTab(tb.id);},style:{width:'100%',textAlign:'left',padding:'11px 18px',background:tab===tb.id?t.accent+'22':'transparent',color:tab===tb.id?t.accent:t.textMuted,fontSize:13,fontFamily:t.fontFamily,borderLeft:tab===tb.id?'3px solid '+t.accent:'3px solid transparent'}},tb.label);})
+      ),
+      h('button',{className:'ab',onClick:onExit,style:{margin:'12px 18px',background:t.surfaceAlt,color:t.text,borderRadius:10,padding:'10px',fontSize:13,fontFamily:t.fontFamily}},'← Back to Calc')
+    ),
+    h('div',{style:{flex:1,padding:'28px 32px',overflowY:'auto'}},
+      saved&&h('div',{style:{background:saved.startsWith('❌')?'#ef444422':'#16a34a22',border:'1px solid '+(saved.startsWith('❌')?'#ef4444':'#16a34a'),color:saved.startsWith('❌')?'#f87171':'#4ade80',borderRadius:10,padding:'10px 16px',marginBottom:16,fontSize:13}},saved.startsWith('❌')?saved:'✅ '+saved),
+
+      // OVERVIEW
+      tab==='overview'&&h('div',null,
+        h('h2',{style:{color:t.text,fontFamily:"'Sora',sans-serif",margin:'0 0 20px'}},'Overview'),
+        h('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:24}},
+          ...[{icon:'🔢',val:stats.total,label:'Total Calculations'},{icon:'📋',val:history.length,label:'History Entries'},{icon:'🔒',val:Object.values(lockedButtons).filter(Boolean).length,label:'Locked Buttons'}].map(function(c){return h('div',{key:c.label,style:{background:t.surface,borderRadius:14,padding:'20px',textAlign:'center'}},
+            h('div',{style:{fontSize:28}},c.icon),
+            h('div',{style:{color:t.accent,fontWeight:700,fontSize:28,margin:'8px 0 4px'}},c.val),
+            h('div',{style:{color:t.textMuted,fontSize:12}},c.label)
+          );})
+        ),
+        h('div',{style:{background:t.surface,borderRadius:14,padding:'20px'}},
+          h('div',{style:{color:t.text,fontWeight:600,marginBottom:12,fontFamily:"'Sora',sans-serif"}},'Connected Users'),
+          h('div',{style:{color:t.textMuted,fontSize:13,lineHeight:1.7}},
+            '🌐 All users connect to this server.',h('br',null),
+            '📋 History is shared — every calculation appears here.',h('br',null),
+            '⚙️ Your admin changes apply to everyone instantly.'
+          )
+        )
+      ),
+
+      // THEME
+      tab==='theme'&&h('div',null,
+        h('h2',{style:{color:t.text,fontFamily:"'Sora',sans-serif",margin:'0 0 20px'}},'Theme Customization'),
+        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}},
+          ...[{k:'bg',l:'Background'},{k:'surface',l:'Surface/Card'},{k:'surfaceAlt',l:'Surface Alt'},{k:'accent',l:'Accent Color'},{k:'buttonBg',l:'Button Background'},{k:'text',l:'Primary Text'},{k:'textMuted',l:'Muted Text'}].map(function(f){return h('div',{key:f.k,style:{background:t.surface,borderRadius:12,padding:'16px',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            h('div',null,h('div',{style:{color:t.text,fontSize:13,fontWeight:600}},f.l),h('div',{style:{color:t.textMuted,fontSize:11,marginTop:2}},t[f.k])),
+            h('input',{type:'color',value:t[f.k]&&t[f.k].length===7?t[f.k]:'#f97316',onChange:function(e){var v=e.target.value;setAdminOverrides(function(o){var n=Object.assign({},o);n[f.k]=v;return n;});},style:{width:40,height:36,border:'none',borderRadius:8,cursor:'pointer'}})
+          );})
+        , h('div',{style:{background:t.surface,borderRadius:12,padding:'16px'}},
+            h('div',{style:{color:t.text,fontSize:13,fontWeight:600,marginBottom:10}},'Border Radius'),
+            h('input',{type:'range',min:0,max:24,value:parseInt(t.borderRadius)||14,onChange:function(e){var v=e.target.value+'px';setAdminOverrides(function(o){var n=Object.assign({},o);n.borderRadius=v;return n;});},style:{width:'100%',accentColor:t.accent}}),
+            h('div',{style:{color:t.textMuted,fontSize:11}},t.borderRadius)
+          )
+        ),
+        h('div',{style:{marginTop:14,display:'flex',gap:10}},
+          h('button',{className:'ab',onClick:async function(){setAdminOverrides({});await pushSettings({adminOverrides:{}});save('Theme reset.');},style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:10,padding:'10px 20px',fontSize:13,fontFamily:t.fontFamily}},'Reset Default'),
+          h('button',{className:'ab',onClick:async function(){var ok=await pushSettings({adminOverrides:adminOverrides});if(ok)save('Theme saved — all users updated!');},style:{background:t.accent,color:'#fff',borderRadius:10,padding:'10px 24px',fontSize:13,fontFamily:t.fontFamily,fontWeight:600}},'Save Theme')
+        )
+      ),
+
+      // FEATURES
+      tab==='features'&&h('div',null,
+        h('h2',{style:{color:t.text,fontFamily:"'Sora',sans-serif",margin:'0 0 20px'}},'Feature Toggles'),
+        h('div',{style:{color:t.textMuted,fontSize:12,marginBottom:16}},'Changes save instantly and apply to all users.'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:12}},
+          ...[{k:'showHistory',l:'History Panel',d:'Allow users to view past calculations'},{k:'showMemory',l:'Memory Buttons',d:'M+, M-, MR, MC buttons'},{k:'showScientific',l:'Scientific Mode',d:'SCI button and trig functions'},{k:'showPercent',l:'Percent Button',d:'% key on the keypad'},{k:'showPlusMinus',l:'Plus/Minus Toggle',d:'± sign flip button'}].map(function(f){return h('div',{key:f.k,style:{background:t.surface,borderRadius:12,padding:'18px 20px'}},
+            h(Toggle,{label:f.l,desc:f.d,checked:features[f.k],onChange:async function(){
+              var newFeatures=Object.assign({},features);newFeatures[f.k]=!features[f.k];
+              setFeatures(newFeatures);
+              await pushSettings({features:newFeatures});
+            },t})
+          );})
+        )
+      ),
+
+      // BUTTONS
+      tab==='buttons'&&h('div',null,
+        h('h2',{style:{color:t.text,fontFamily:"'Sora',sans-serif",margin:'0 0 8px'}},'Button Lock Control'),
+        h('p',{style:{color:t.textMuted,fontSize:13,marginBottom:20}},'Locked buttons are disabled for all users with a 🔒 indicator.'),
+        h('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}},
+          ...allBtns.map(function(btn){var locked=!!lockedButtons[btn];return h('div',{key:btn,onClick:async function(){
+            var newLocked=Object.assign({},lockedButtons);newLocked[btn]=!locked;
+            setLockedButtons(newLocked);
+            await pushSettings({lockedButtons:newLocked});
+          },style:{background:locked?'#ef444422':t.surface,border:'1px solid '+(locked?'#ef4444':t.surfaceAlt),borderRadius:10,padding:'12px',textAlign:'center',cursor:'pointer',transition:'all .15s'}},
+            h('div',{style:{color:locked?'#ef4444':t.text,fontWeight:600,fontSize:18}},btn),
+            h('div',{style:{color:locked?'#ef4444':t.textMuted,fontSize:10,marginTop:3}},locked?'LOCKED':'active')
+          );})
+        ),
+        h('div',{style:{display:'flex',gap:10}},
+          h('button',{className:'ab',onClick:async function(){setLockedButtons({});await pushSettings({lockedButtons:{}});save('All buttons unlocked for all users.');},style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:10,padding:'10px 18px',fontSize:13,fontFamily:t.fontFamily}},'Unlock All'),
+          h('button',{className:'ab',onClick:async function(){var a={};allBtns.forEach(function(b){a[b]=true;});setLockedButtons(a);await pushSettings({lockedButtons:a});save('All buttons locked for all users.');},style:{background:'#ef444422',color:'#ef4444',borderRadius:10,padding:'10px 18px',fontSize:13,fontFamily:t.fontFamily}},'Lock All')
+        )
+      ),
+
+      // HISTORY
+      tab==='history'&&h('div',null,
+        h('h2',{style:{color:t.text,fontFamily:"'Sora',sans-serif",margin:'0 0 16px'}},'Calculation History'),
+        h('div',{style:{color:t.textMuted,fontSize:12,marginBottom:14}},'All calculations from all users appear here.'),
+        h('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:14}},
+          h('div',{style:{color:t.textMuted,fontSize:13}},history.length+' entries'),
+          h('button',{className:'ab',onClick:async function(){await apiDelete('/api/history');setHistory([]);save('History cleared.');},style:{background:'#ef444422',color:'#ef4444',borderRadius:8,padding:'8px 16px',fontSize:12,fontFamily:t.fontFamily}},'Clear All')
+        ),
+        history.length===0
+          ?h('div',{style:{color:t.textMuted,textAlign:'center',padding:40}},'No history yet.')
+          :history.map(function(item,i){return h('div',{key:i,style:{background:t.surface,borderRadius:10,padding:'12px 16px',marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            h('div',null,h('div',{style:{color:t.textMuted,fontSize:12}},item.expr),h('div',{style:{color:t.text,fontSize:15,fontWeight:600}},'= '+item.result)),
+            h('div',{style:{color:t.textMuted,fontSize:11}},item.time)
+          );})
+      ),
+
+      // SETTINGS
+      tab==='settings'&&h('div',null,
+        h('h2',{style:{color:t.text,fontFamily:"'Sora',sans-serif",margin:'0 0 20px'}},'Settings'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+          h('div',{style:{background:t.surface,borderRadius:12,padding:'20px'}},
+            h('div',{style:{color:t.text,fontWeight:600,marginBottom:10}},'App Name'),
+            h('div',{style:{color:t.textMuted,fontSize:12,marginBottom:10}},'This name appears for all users.'),
+            h('div',{style:{display:'flex',gap:10}},
+              h('input',{value:nameInput,onChange:function(e){setNameInput(e.target.value);},style:{flex:1,background:t.surfaceAlt,border:'1px solid '+t.accent+'33',color:t.text,borderRadius:8,padding:'10px 14px',fontSize:14,fontFamily:t.fontFamily}}),
+              h('button',{className:'ab',onClick:async function(){var ok=await pushSettings({appName:nameInput});if(ok){setAppName(nameInput);save('App name updated for all users!');}},style:{background:t.accent,color:'#fff',borderRadius:8,padding:'10px 20px',fontFamily:t.fontFamily,fontWeight:600,fontSize:13}},'Save')
+            )
+          ),
+          h('div',{style:{background:t.surface,borderRadius:12,padding:'20px'}},
+            h('div',{style:{color:t.text,fontWeight:600,marginBottom:4}},'Change Admin PIN'),
+            h('div',{style:{color:t.textMuted,fontSize:12,marginBottom:16}},'PIN is stored securely on the server.'),
+            pinMsg.text&&h('div',{style:{background:pinMsg.type==='success'?'#16a34a22':'#ef444422',border:'1px solid '+(pinMsg.type==='success'?'#16a34a':'#ef4444'),color:pinMsg.type==='success'?'#4ade80':'#f87171',borderRadius:8,padding:'10px 14px',fontSize:13,marginBottom:14}},(pinMsg.type==='success'?'✅ ':'❌ ')+pinMsg.text),
+            pinStep==='idle'&&h('button',{className:'ab',onClick:function(){setPinStep('verify');setPinMsg({text:'',type:''});},style:{background:t.accent,color:'#fff',borderRadius:8,padding:'10px 22px',fontFamily:t.fontFamily,fontWeight:600,fontSize:13}},'🔑 Change PIN'),
+            pinStep==='verify'&&h('div',null,
+              h('div',{style:{color:t.textMuted,fontSize:13,marginBottom:10}},'Step 1 of 3 — Enter your current PIN'),
+              h(PinInputRow,{value:pinVerify,onChange:setPinVerify,t:t}),
+              h('div',{style:{display:'flex',gap:8,marginTop:12}},
+                h('button',{className:'ab',onClick:function(){setPinStep('idle');setPinVerify('');},style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:8,padding:'9px 18px',fontFamily:t.fontFamily,fontSize:13}},'Cancel'),
+                h('button',{className:'ab',onClick:async function(){
+                  var res=await apiPost('/api/verify-pin',{pin:pinVerify});
+                  if(res.ok){setPinStep('new');setPinVerify('');setPinMsg({text:'',type:''});}
+                  else{setPinMsg({text:'Wrong current PIN.',type:'error'});setPinVerify('');}
+                },style:{background:t.accent,color:'#fff',borderRadius:8,padding:'9px 20px',fontFamily:t.fontFamily,fontWeight:600,fontSize:13}},'Verify →')
+              )
+            ),
+            pinStep==='new'&&h('div',null,
+              h('div',{style:{color:t.textMuted,fontSize:13,marginBottom:10}},'Step 2 of 3 — Enter your new PIN'),
+              h(PinInputRow,{value:pinNew,onChange:setPinNew,t:t}),
+              h('div',{style:{display:'flex',gap:8,marginTop:12}},
+                h('button',{className:'ab',onClick:function(){setPinStep('verify');setPinNew('');},style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:8,padding:'9px 18px',fontFamily:t.fontFamily,fontSize:13}},'← Back'),
+                h('button',{className:'ab',onClick:function(){if(pinNew.length!==4){setPinMsg({text:'PIN must be 4 digits.',type:'error'});return;}setPinStep('confirm');setPinMsg({text:'',type:''});},style:{background:t.accent,color:'#fff',borderRadius:8,padding:'9px 20px',fontFamily:t.fontFamily,fontWeight:600,fontSize:13}},'Next →')
+              )
+            ),
+            pinStep==='confirm'&&h('div',null,
+              h('div',{style:{color:t.textMuted,fontSize:13,marginBottom:10}},'Step 3 of 3 — Confirm new PIN'),
+              h(PinInputRow,{value:pinConfirm,onChange:setPinConfirm,t:t}),
+              h('div',{style:{display:'flex',gap:8,marginTop:12}},
+                h('button',{className:'ab',onClick:function(){setPinStep('new');setPinConfirm('');},style:{background:t.surfaceAlt,color:t.textMuted,borderRadius:8,padding:'9px 18px',fontFamily:t.fontFamily,fontSize:13}},'← Back'),
+                h('button',{className:'ab',onClick:async function(){
+                  if(pinConfirm!==pinNew){setPinMsg({text:'PINs do not match.',type:'error'});setPinConfirm('');return;}
+                  var res=await apiPost('/api/change-pin',{currentPin:sessionStorage.getItem('adminPin')||'',newPin:pinNew});
+                  if(res.ok){
+                    sessionStorage.setItem('adminPin',pinNew);
+                    setPinStep('idle');setPinNew('');setPinConfirm('');
+                    setPinMsg({text:'PIN changed!',type:'success'});
+                    setTimeout(function(){setPinMsg({text:'',type:''}); },3000);
+                  }else{setPinMsg({text:res.error||'Failed.',type:'error'});}
+                },style:{background:'#16a34a',color:'#fff',borderRadius:8,padding:'9px 20px',fontFamily:t.fontFamily,fontWeight:600,fontSize:13}},'✅ Save PIN')
+              )
+            )
+          ),
+          h('div',{style:{background:t.surface,borderRadius:12,padding:'20px'}},
+            h('div',{style:{color:t.text,fontWeight:600,marginBottom:6}},'Reset All Data'),
+            h('div',{style:{color:t.textMuted,fontSize:12,marginBottom:12}},'Clears history, stats, locked buttons, and theme for everyone.'),
+            h('button',{className:'ab',onClick:async function(){
+              await apiDelete('/api/history');
+              var clean={appName:'CalcPro',features:{showHistory:true,showMemory:true,showScientific:true,showPercent:true,showPlusMinus:true},lockedButtons:{},adminOverrides:{}};
+              await pushSettings(clean);
+              setHistory([]);setLockedButtons({});setAdminOverrides({});setAppName('CalcPro');
+              setFeatures(clean.features);save('All data reset for everyone.');
+            },style:{background:'#ef444422',color:'#ef4444',borderRadius:8,padding:'10px 20px',fontFamily:t.fontFamily,fontSize:13}},'Reset Everything')
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── User Settings ─────────────────────────────────────────────────────────────
+function UserSettings({t,userPrefs,setUserPrefs,history,setHistory,onBack}){
+  const [cleared,setCleared]=useState(false);
+  var set=function(k,v){setUserPrefs(function(p){var n=Object.assign({},p);n[k]=v;return n;});};
+
+  return h('div',{style:{minHeight:'100vh',background:t.bg,fontFamily:t.fontFamily}},
+    h('div',{style:{background:t.surface,padding:'16px 20px',display:'flex',alignItems:'center',gap:14,borderBottom:'1px solid '+t.surfaceAlt,position:'sticky',top:0,zIndex:10}},
+      h('button',{className:'ub',onClick:onBack,style:{background:t.surfaceAlt,color:t.text,borderRadius:10,padding:'8px 14px',fontSize:16,fontFamily:t.fontFamily}},'←'),
+      h('div',null,
+        h('div',{style:{color:t.text,fontWeight:700,fontSize:16,fontFamily:"'Sora',sans-serif"}},'Settings'),
+        h('div',{style:{color:t.textMuted,fontSize:11}},'Your personal preferences')
+      )
+    ),
+    h('div',{style:{maxWidth:480,margin:'0 auto',padding:'20px 16px'}},
+      h(Section,{title:'🎨 Appearance',t:t},
+        h('div',null,
+          h('div',{style:{color:t.text,fontWeight:600,fontSize:14,marginBottom:10}},'Theme'),
+          h('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}},
+            ...[{k:'light',e:'☀️',l:'Light',d:'Always light'},{k:'dark',e:'🌙',l:'Dark',d:'Always dark'},{k:'system',e:'📱',l:'System',d:'Follow device'}].map(function(opt){return h('div',{key:opt.k,onClick:function(){set('themeMode',opt.k);},style:{background:userPrefs.themeMode===opt.k?t.accent+'22':t.surfaceAlt,border:'2px solid '+(userPrefs.themeMode===opt.k?t.accent:'transparent'),borderRadius:12,padding:'14px 10px',textAlign:'center',cursor:'pointer',transition:'all .15s'}},
+              h('div',{style:{fontSize:22,marginBottom:4}},opt.e),
+              h('div',{style:{color:userPrefs.themeMode===opt.k?t.accent:t.text,fontSize:12,fontWeight:600}},opt.l),
+              h('div',{style:{color:t.textMuted,fontSize:10,marginTop:2}},opt.d)
+            );})
+          )
+        )
+      ),
+      h(Section,{title:'🔤 Font & Display',t:t},
+        h('div',null,
+          h('div',{style:{color:t.text,fontWeight:600,fontSize:14,marginBottom:10}},'Font Size'),
+          h('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}},
+            ...[{k:'small',l:'Small',sz:13},{k:'medium',l:'Medium',sz:17},{k:'large',l:'Large',sz:22}].map(function(opt){return h('div',{key:opt.k,onClick:function(){set('fontSize',opt.k);},style:{background:userPrefs.fontSize===opt.k?t.accent+'22':t.surfaceAlt,border:'2px solid '+(userPrefs.fontSize===opt.k?t.accent:'transparent'),borderRadius:12,padding:'14px 10px',textAlign:'center',cursor:'pointer',transition:'all .15s'}},
+              h('div',{style:{fontSize:opt.sz,fontWeight:700,color:userPrefs.fontSize===opt.k?t.accent:t.text,marginBottom:4,fontFamily:t.fontFamily}},'Aa'),
+              h('div',{style:{color:t.textMuted,fontSize:11}},opt.l)
+            );})
+          )
+        ),
+        h('div',null,
+          h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+            h('div',{style:{color:t.text,fontWeight:600,fontSize:14}},'Line Scale'),
+            h('div',{style:{color:t.accent,fontSize:13,fontWeight:700,fontFamily:t.fontFamily}},userPrefs.lineScale.toFixed(2)+'×')
+          ),
+          h('input',{type:'range',min:0.8,max:1.8,step:0.05,value:userPrefs.lineScale,onChange:function(e){set('lineScale',parseFloat(e.target.value));},style:{width:'100%',accentColor:t.accent,height:6}}),
+          h('div',{style:{display:'flex',justifyContent:'space-between',marginTop:4}},
+            h('span',{style:{color:t.textMuted,fontSize:11}},'Compact (0.8×)'),
+            h('span',{style:{color:t.textMuted,fontSize:11}},'Relaxed (1.8×)')
+          ),
+          h('div',{style:{background:t.surfaceAlt,borderRadius:10,padding:'12px 16px',marginTop:12,lineHeight:userPrefs.lineScale}},
+            h('div',{style:{color:t.textMuted,fontSize:12*FS[userPrefs.fontSize]}},'Preview'),
+            h('div',{style:{color:t.text,fontSize:32*FS[userPrefs.fontSize],fontWeight:700,fontFamily:t.fontFamily}},'1,234.56')
+          )
+        )
+      ),
+      h(Section,{title:'📋 History',t:t},
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          h('div',null,
+            h('div',{style:{color:t.text,fontWeight:600,fontSize:14}},'Clear Calculation History'),
+            h('div',{style:{color:t.textMuted,fontSize:12,marginTop:2}},history.length+' saved '+(history.length===1?'entry':'entries'))
+          ),
+          cleared
+            ?h('div',{style:{color:'#4ade80',fontSize:13,fontWeight:600}},'✅ Cleared!')
+            :h('button',{className:'ub',onClick:async function(){await apiDelete('/api/history');setHistory([]);setCleared(true);setTimeout(function(){setCleared(false);},3000);},style:{background:'#ef444422',color:'#ef4444',border:'1px solid #ef444466',borderRadius:10,padding:'9px 16px',fontSize:13,fontFamily:t.fontFamily,fontWeight:600}},'Clear')
+        )
+      ),
+      h(Section,{title:'💬 Help & Support',t:t},
+        h('div',{style:{color:t.textMuted,fontSize:13,lineHeight:1.5}},'Having trouble? Reach out directly:'),
+        h('a',{href:'mailto:joshuapashirima@gmail.com',style:{display:'flex',alignItems:'center',gap:14,background:t.surfaceAlt,borderRadius:12,padding:'14px 16px'}},
+          h('div',{style:{background:t.accent+'33',borderRadius:10,width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}},'✉️'),
+          h('div',null,h('div',{style:{color:t.text,fontWeight:600,fontSize:13}},'Email Support'),h('div',{style:{color:t.accent,fontSize:12,marginTop:2}},'joshuapashirima@gmail.com'))
+        ),
+        h('a',{href:'tel:+255750709589',style:{display:'flex',alignItems:'center',gap:14,background:t.surfaceAlt,borderRadius:12,padding:'14px 16px'}},
+          h('div',{style:{background:t.accent+'33',borderRadius:10,width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}},'📞'),
+          h('div',null,h('div',{style:{color:t.text,fontWeight:600,fontSize:13}},'Phone / WhatsApp'),h('div',{style:{color:t.accent,fontSize:12,marginTop:2}},'+255 750 709 589'))
+        ),
+        h('div',{style:{color:t.textMuted,fontSize:11,textAlign:'center'}},'Tap to open directly in your app')
+      ),
+      h('div',{style:{textAlign:'center',color:t.textMuted,fontSize:11,padding:'8px 0 20px'}},'CalcPro • v2.0 — Server Edition')
+    )
+  );
+}
+
+// ── App Root ──────────────────────────────────────────────────────────────────
+function App(){
+  const [view,setView]=useState('calc');
+  const [loading,setLoading]=useState(true); // loading server settings
+  const [pinInput,setPinInput]=useState('');
+  const [pinError,setPinError]=useState(false);
+  const [pinLoading,setPinLoading]=useState(false);
+
+  // Server-controlled state
+  const [appName,setAppName]=useState('CalcPro');
+  const [features,setFeatures]=useState({showHistory:true,showMemory:true,showScientific:true,showPercent:true,showPlusMinus:true});
+  const [lockedButtons,setLockedButtons]=useState({});
+  const [adminOverrides,setAdminOverrides]=useState({});
+  const [history,setHistory]=useState([]);
+
+  // Personal (localStorage) state
+  const [userPrefs,setUserPrefs]=useState(function(){return lsGet('cp_userPrefs',{themeMode:'system',fontSize:'medium',lineScale:1.0});});
+  const [systemDark,setSystemDark]=useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+  // Persist userPrefs locally
+  useEffect(function(){lsSet('cp_userPrefs',userPrefs);},[userPrefs]);
+
+  // Detect system theme changes
+  useEffect(function(){
+    var mq=window.matchMedia('(prefers-color-scheme: dark)');
+    var handler=function(e){setSystemDark(e.matches);};
+    mq.addEventListener('change',handler);
+    return function(){mq.removeEventListener('change',handler);};
+  },[]);
+
+  // Load settings and history from server on startup
+  useEffect(function(){
+    Promise.all([apiGet('/api/settings'),apiGet('/api/history')])
+      .then(function(results){
+        var s=results[0],h=results[1];
+        if(s.appName)setAppName(s.appName);
+        if(s.features)setFeatures(s.features);
+        if(s.lockedButtons)setLockedButtons(s.lockedButtons);
+        if(s.adminOverrides)setAdminOverrides(s.adminOverrides);
+        setHistory(h);
+        setLoading(false);
+      })
+      .catch(function(){setLoading(false);});
+  },[]);
+
+  var isDark=userPrefs.themeMode==='dark'||(userPrefs.themeMode==='system'&&systemDark);
+  var t=Object.assign({},isDark?DK:LK,adminOverrides);
+
+  var addHistory=async function(expr,result){
+    var time=new Date().toLocaleTimeString();
+    await apiPost('/api/history',{expr:expr,result:result,time:time});
+    setHistory(function(h){return [{expr:expr,result:result,time:time}].concat(h).slice(0,50);});
+  };
+  var recordOp=function(op){/* tracked server-side via history count */};
+
+  if(loading)return h(LoadingScreen,{t:Object.assign({},isDark?DK:LK)});
+
+  if(view==='pin')return h(PinScreen,{pin:pinInput,setPin:setPinInput,error:pinError,loading:pinLoading,
+    onSubmit:async function(){
+      setPinLoading(true);
+      var res=await apiPost('/api/verify-pin',{pin:pinInput});
+      setPinLoading(false);
+      if(res.ok){
+        sessionStorage.setItem('adminPin',pinInput);
+        setView('admin');setPinInput('');setPinError(false);
+      }else{setPinError(true);setPinInput('');}
+    },
+    onBack:function(){setView('calc');setPinInput('');setPinError(false);},t:t});
+
+  if(view==='admin')return h(AdminPanel,{t:t,appName:appName,setAppName:setAppName,history:history,setHistory:setHistory,lockedButtons:lockedButtons,setLockedButtons:setLockedButtons,features:features,setFeatures:setFeatures,adminOverrides:adminOverrides,setAdminOverrides:setAdminOverrides,onExit:function(){setView('calc');}});
+
+  if(view==='usersettings')return h(UserSettings,{t:t,userPrefs:userPrefs,setUserPrefs:setUserPrefs,history:history,setHistory:setHistory,onBack:function(){setView('calc');}});
+
+  return h(Calculator,{t:t,appName:appName,history:history,addHistory:addHistory,recordOp:recordOp,lockedButtons:lockedButtons,features:features,userPrefs:userPrefs,onAdminPress:function(){setView('pin');},onUserSettings:function(){setView('usersettings');}});
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
