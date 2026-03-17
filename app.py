@@ -23,16 +23,20 @@ def init_db():
         time       TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
-    # Default settings — only inserted if they don't already exist
+
+    # Default settings — ensure PIN is a string
     defaults = {
-        'pin':            '1234',
-        'appName':        'CalcPro',
-        'features':       json.dumps({'showHistory':True,'showMemory':True,'showScientific':True,'showPercent':True,'showPlusMinus':True}),
-        'lockedButtons':  json.dumps({}),
+        'pin': '1234',
+        'appName': 'CalcPro',
+        'features': json.dumps({'showHistory': True,'showMemory': True,'showScientific': True,'showPercent': True,'showPlusMinus': True}),
+        'lockedButtons': json.dumps({}),
         'adminOverrides': json.dumps({}),
     }
+
     for k, v in defaults.items():
-        db.execute('INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)', (k, v))
+        # Use INSERT OR REPLACE to ensure defaults are applied correctly
+        db.execute('INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)', (k, json.dumps(str(v)) if k=='pin' else v))
+
     db.commit()
     db.close()
 
@@ -40,10 +44,19 @@ def get_setting(key):
     db = get_db()
     row = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
     db.close()
-    return json.loads(row['value']) if row else None
+    if not row:
+        return None
+    val = json.loads(row['value'])
+    # Ensure PIN is always string
+    if key == 'pin':
+        val = str(val)
+    return val
 
 def set_setting(key, value):
     db = get_db()
+    # Always store PIN as string
+    if key == 'pin':
+        value = str(value)
     db.execute('INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)', (key, json.dumps(value)))
     db.commit()
     db.close()
@@ -57,9 +70,9 @@ def index():
 @app.route('/api/settings', methods=['GET'])
 def api_get_settings():
     return jsonify({
-        'appName':        get_setting('appName'),
-        'features':       get_setting('features'),
-        'lockedButtons':  get_setting('lockedButtons'),
+        'appName': get_setting('appName'),
+        'features': get_setting('features'),
+        'lockedButtons': get_setting('lockedButtons'),
         'adminOverrides': get_setting('adminOverrides'),
     })
 
@@ -67,7 +80,7 @@ def api_get_settings():
 @app.route('/api/settings', methods=['POST'])
 def api_update_settings():
     data = request.get_json()
-    pin  = data.get('pin','')
+    pin = str(data.get('pin',''))  # ensure PIN is string
     if pin != get_setting('pin'):
         return jsonify({'ok': False, 'error': 'Wrong PIN'}), 403
     allowed = ['appName','features','lockedButtons','adminOverrides']
@@ -80,14 +93,16 @@ def api_update_settings():
 @app.route('/api/verify-pin', methods=['POST'])
 def api_verify_pin():
     data = request.get_json()
-    ok   = data.get('pin','') == get_setting('pin')
+    pin = str(data.get('pin',''))
+    ok = pin == get_setting('pin')
     return jsonify({'ok': ok})
 
 # ── API: Change PIN ────────────────────────────────────────────────────────────
 @app.route('/api/change-pin', methods=['POST'])
 def api_change_pin():
     data = request.get_json()
-    if data.get('currentPin','') != get_setting('pin'):
+    current_pin = str(data.get('currentPin',''))
+    if current_pin != get_setting('pin'):
         return jsonify({'ok': False, 'error': 'Wrong current PIN'}), 403
     new_pin = str(data.get('newPin',''))
     if len(new_pin) != 4 or not new_pin.isdigit():
@@ -98,7 +113,7 @@ def api_change_pin():
 # ── API: History ───────────────────────────────────────────────────────────────
 @app.route('/api/history', methods=['GET'])
 def api_get_history():
-    db   = get_db()
+    db = get_db()
     rows = db.execute('SELECT expr,result,time FROM history ORDER BY id DESC LIMIT 50').fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
@@ -106,7 +121,7 @@ def api_get_history():
 @app.route('/api/history', methods=['POST'])
 def api_add_history():
     data = request.get_json()
-    db   = get_db()
+    db = get_db()
     db.execute('INSERT INTO history (expr,result,time) VALUES (?,?,?)',
                (data.get('expr',''), data.get('result',''), data.get('time','')))
     db.commit()
@@ -124,7 +139,7 @@ def api_clear_history():
 # ── API: Stats ─────────────────────────────────────────────────────────────────
 @app.route('/api/stats', methods=['GET'])
 def api_get_stats():
-    db    = get_db()
+    db = get_db()
     total = db.execute('SELECT COUNT(*) as c FROM history').fetchone()['c']
     db.close()
     return jsonify({'total': total})
@@ -133,5 +148,4 @@ def api_get_stats():
 if __name__ == '__main__':
     init_db()
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-
+    app.run(host='0.0.0.0', port=port, debug=True)  # debug=True for easier testing
