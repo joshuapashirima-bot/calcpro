@@ -80,7 +80,7 @@ def api_update_settings():
 @app.route('/api/verify-pin', methods=['POST'])
 def api_verify_pin():
     data = request.get_json()
-    ok   = data.get('pin','')) == str(get_setting('pin')
+    ok   = data.get('pin','') == str(get_setting('pin')
     return jsonify({'ok': ok})
 
 # ── API: Change PIN ────────────────────────────────────────────────────────────
