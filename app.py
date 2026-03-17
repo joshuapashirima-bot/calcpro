@@ -80,7 +80,7 @@ def api_update_settings():
 @app.route('/api/verify-pin', methods=['POST'])
 def api_verify_pin():
     data = request.get_json()
-    ok   = data.get('pin','') == str(get_setting('pin')
+    ok   = data.get('pin','') == get_setting('pin')
     return jsonify({'ok': ok})
 
 # ── API: Change PIN ────────────────────────────────────────────────────────────
@@ -130,7 +130,8 @@ def api_get_stats():
     return jsonify({'total': total})
 
 # ── Run ────────────────────────────────────────────────────────────────────────
-init_db()
 if __name__ == '__main__':
+    init_db()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
