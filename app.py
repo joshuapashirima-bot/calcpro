@@ -67,7 +67,7 @@ def api_get_settings():
 @app.route('/api/settings', methods=['POST'])
 def api_update_settings():
     data = request.get_json()
-    pin  = data.get('pin','')
+    pin  = data.get('pin',''))
     if pin != get_setting('pin'):
         return jsonify({'ok': False, 'error': 'Wrong PIN'}), 403
     allowed = ['appName','features','lockedButtons','adminOverrides']
@@ -80,7 +80,7 @@ def api_update_settings():
 @app.route('/api/verify-pin', methods=['POST'])
 def api_verify_pin():
     data = request.get_json()
-    ok   = data.get('pin','') == get_setting('pin')
+    ok   = data.get('pin','')) == get_setting('pin')
     return jsonify({'ok': ok})
 
 # ── API: Change PIN ────────────────────────────────────────────────────────────
